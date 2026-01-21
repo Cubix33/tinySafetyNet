@@ -37,14 +37,25 @@ Using such lightweight intelligence for women safety applications makes it even 
 A simple view of the model used for audio emotion detection. It takes MFCC features as input and produces a probability over classes.
 
 ```mermaid
-flowchart LR
-  A[Input: MFCC features (40 × T × 1)] --> B[Conv layer (downsamples)]
-  B --> C[Lightweight conv block 1]
-  C --> D[Lightweight conv block 2]
-  D --> E[Global average pooling]
-  E --> F[Dropout (0.4)]
-  F --> G[Final dense layer → softmax]
-  G --> H[Output: emotion class]
+flowchart TD
+    A["Input: MFCC features (40 x T x 1)"]
+    B["Conv layer (Downsampling)"]
+    C["Depthwise-Separable Conv Block 1"]
+    D["Depthwise-Separable Conv Block 2"]
+    E["Global Average Pooling"]
+    F["Dropout (rate = 0.4)"]
+    G["Dense Layer + Softmax"]
+    H["Output: Emotion Class"]
+
+    A --> B
+    B --> C
+    C --> D
+    D --> E
+    E --> F
+    F --> G
+    G --> H
+
+
 ```
 
 ---
