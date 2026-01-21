@@ -6,6 +6,7 @@ import paho.mqtt.client as mqtt
 import tempfile
 import os
 import time
+import uuid
 
 # ==========================================
 # 1. CONFIGURATION
@@ -30,20 +31,24 @@ EXPECTED_FRAMES = 130
 # ==========================================
 # 2. MQTT SETUP (ROBUST VERSION)
 # ==========================================
+# ==========================================
+# 2. MQTT SETUP (BULLETPROOF VERSION)
+# ==========================================
 def send_to_wokwi(command):
     try:
-        # 1. Setup Client
-        client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2)
+        # 1. Generate a Random Client ID to avoid "Ghost Sessions"
+        # This forces the broker to treat this as a brand new connection
+        random_id = f"streamlit_client_{uuid.uuid4()}"
+        client = mqtt.Client(callback_api_version=mqtt.CallbackAPIVersion.VERSION2, client_id=random_id)
         
         # 2. Connect
         client.connect(CONFIG["mqtt_broker"], 1883, 60)
-        client.loop_start() # Start background network thread
+        client.loop_start() 
         
         # 3. Publish with QoS=1 (Guarantees delivery)
-        # We capture the 'message info' object to track status
         msg_info = client.publish(CONFIG["mqtt_topic"], command, qos=1)
         
-        # 4. BLOCK until the broker confirms receipt (Max 2 seconds)
+        # 4. BLOCK until the broker confirms receipt
         msg_info.wait_for_publish(timeout=2.0)
         
         # 5. Cleanup
@@ -123,20 +128,24 @@ def preprocess_audio(audio_path):
 # ==========================================
 # 5. STREAMLIT UI
 # ==========================================
+# ==========================================
+# 5. STREAMLIT UI (FIXED)
+# ==========================================
 st.title("🛡️ Women Safety Analytics (Wokwi Linked)")
 st.markdown(f"**Connected to:** `{CONFIG['mqtt_topic']}` on `{CONFIG['mqtt_broker']}`")
 
-uploaded_file = st.file_uploader("Upload Audio (WAV/MP3)", type=["wav", "mp3"])
-
-if uploaded_file is not None:
+# --- Helper Function to Process Audio ---
+def analyze_audio(source):
     # Save temp file
     with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as tmp:
-        tmp.write(uploaded_file.read())
+        tmp.write(source.read())
         audio_path = tmp.name
 
+    # Display Audio Player ONCE
     st.audio(audio_path)
 
-    if st.button("Analyze Audio"):
+    # Unique key ensures buttons don't conflict between tabs
+    if st.button("Analyze Audio", key=f"btn_{source.name}"):
         if interpreter is None:
             st.error("Model not loaded.")
         else:
@@ -186,4 +195,25 @@ if uploaded_file is not None:
                     st.bar_chart(probs)
 
     # Cleanup
-    os.remove(audio_path)
+    try:
+        os.remove(audio_path)
+    except:
+        pass
+
+# --- Create Tabs ---
+tab1, tab2 = st.tabs(["📂 Upload File", "🎤 Record Audio"])
+
+# --- Tab 1: Upload Logic ---
+with tab1:
+    uploaded_file = st.file_uploader("Upload Audio (WAV/MP3)", type=["wav", "mp3"])
+    if uploaded_file:
+        analyze_audio(uploaded_file)
+
+# --- Tab 2: Record Logic ---
+with tab2:
+    recorded_audio = st.audio_input("Record a voice note")
+    if recorded_audio:
+        analyze_audio(recorded_audio)
+
+    # # Cleanup
+    # os.remove(audio_path)

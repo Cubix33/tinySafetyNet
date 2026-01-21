@@ -1,0 +1,5 @@
+streamlit>=1.39.0
+numpy
+tensorflow-cpu
+librosa
+paho-mqtt
