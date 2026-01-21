@@ -32,6 +32,24 @@ Using such lightweight intelligence for women safety applications makes it even 
 
 ---
 
+## 🧩 Model Architecture (DS-CNN)
+
+This is the exact architecture used in the training script for the DS-CNN model (see training code in the repo). It consumes MFCC features shaped as (40, T, 1) where T is the number of time frames.
+
+- Input: (40, T, 1) MFCCs
+- Conv2D 32 filters, 3×3, stride 2, same padding → BatchNorm → ReLU
+- DepthwiseConv2D 3×3, stride 1, same padding → BatchNorm → ReLU
+- Pointwise Conv2D (1×1) 64 filters → BatchNorm → ReLU
+- DepthwiseConv2D 3×3, stride 2, same padding → BatchNorm → ReLU
+- Pointwise Conv2D (1×1) 128 filters → BatchNorm → ReLU
+- GlobalAveragePooling2D
+- Dropout 0.4
+- Dense Softmax (num_classes)
+
+Rationale: Depthwise Separable Convolutions drastically reduce parameters and compute while preserving spatial-temporal feature quality, making the model compact and TFLite-friendly for TinyML deployments.
+
+---
+
 ## 📂 Project Structure
 
 ```bash
@@ -108,19 +126,13 @@ Since we don't have a physical badge, we simulate it using **Wokwi**.
 
 Connect the components to the ESP32 pins as follows:
 
-| Component | Pin (ESP32) | Pin (Component) |
-
-| --- | --- | --- |
-
-| **Red LED** | `GPIO 13` | Anode (+) |
-
-| **Yellow LED** | `GPIO 12` | Anode (+) |
-
-| **Green LED** | `GPIO 14` | Anode (+) |
-
-| **Buzzer** | `GPIO 27` | Positive (+) |
-
-| **All Grounds** | `GND` | Cathode (-) |
+| Component   | Pin (ESP32) | Pin (Component) |
+| ---         | ---         | ---             |
+| Red LED     | GPIO 13     | Anode (+)       |
+| Yellow LED  | GPIO 12     | Anode (+)       |
+| Green LED   | GPIO 14     | Anode (+)       |
+| Buzzer      | GPIO 27     | Positive (+)    |
+| All Grounds | GND         | Cathode (-)     |
 
 ### 3. The Firmware Code (`sketch.ino`)
 
