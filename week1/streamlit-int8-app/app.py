@@ -11,17 +11,23 @@ import uuid
 # ==========================================
 # 1. CONFIGURATION
 # ==========================================
+# ==========================================
+# 1. CONFIGURATION (FIXED PATHS)
+# ==========================================
+# Get the absolute path of the folder where app.py is running
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+
 CONFIG = {
     "sample_rate": 22050,
     "duration": 3.0,
     "n_mfcc": 40,
-    "model_path": "women_safety_dscnn_f16.tflite",
-    "classes_path": "classes.npy",
+    # Join the base dir with the file names
+    "model_path": os.path.join(BASE_DIR, "women_safety_dscnn_f16.tflite"),
+    "classes_path": os.path.join(BASE_DIR, "classes.npy"),
     # MQTT (Wokwi)
     "mqtt_broker": "broker.hivemq.com",
     "mqtt_topic": "tinyml/anshika/badge"
 }
-
 TARGET_LENGTH = int(CONFIG["sample_rate"] * CONFIG["duration"])
 EXPECTED_FRAMES = 130 
 
