@@ -15,16 +15,30 @@ import uuid
 # 1. CONFIGURATION (FIXED PATHS)
 # ==========================================
 # Get the absolute path of the folder where app.py is running
+# ==========================================
+# 1. CONFIGURATION (DEBUGGING MODE)
+# ==========================================
+# Get the folder where this script (app.py) lives
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+
+# --- DEBUGGING: PRINT THESE TO SCREEN ---
+st.write(f"📂 Script Location: `{BASE_DIR}`")
+try:
+    files_in_dir = os.listdir(BASE_DIR)
+    st.write(f"📄 Files found here: `{files_in_dir}`")
+except Exception as e:
+    st.error(f"Cannot read directory: {e}")
+
+# Construct Paths
+MODEL_PATH = os.path.join(BASE_DIR, "women_safety_dscnn_f16.tflite")
+CLASSES_PATH = os.path.join(BASE_DIR, "classes.npy")
 
 CONFIG = {
     "sample_rate": 22050,
     "duration": 3.0,
     "n_mfcc": 40,
-    # Join the base dir with the file names
-    "model_path": os.path.join(BASE_DIR, "women_safety_dscnn_f16.tflite"),
-    "classes_path": os.path.join(BASE_DIR, "classes.npy"),
-    # MQTT (Wokwi)
+    "model_path": MODEL_PATH,
+    "classes_path": CLASSES_PATH,
     "mqtt_broker": "broker.hivemq.com",
     "mqtt_topic": "tinyml/anshika/badge"
 }
