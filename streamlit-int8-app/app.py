@@ -2,134 +2,188 @@ import streamlit as st
 import numpy as np
 import tensorflow as tf
 import librosa
+import paho.mqtt.client as mqtt
 import tempfile
 import os
+import time
 
 # ==========================================
-# CONFIG (MATCHES YOUR CODE EXACTLY)
+# 1. CONFIGURATION
 # ==========================================
-TARGET_SR = 16000
-N_MELS = 64
-
-ID_TO_LABEL = {
-    0: "Safe/Neutral",
-    1: "DANGER (Fear)",
-    2: "Caution (Angry)"
+CONFIG = {
+    "sample_rate": 22050,
+    "duration": 3.0,
+    "n_mfcc": 40,
+    "model_path": "women_safety_dscnn_f16.tflite",
+    "classes_path": "classes.npy",
+    # MQTT (Wokwi)
+    "mqtt_broker": "broker.hivemq.com",
+    "mqtt_topic": "tinyml/anshika/badge"
 }
 
+TARGET_LENGTH = int(CONFIG["sample_rate"] * CONFIG["duration"])
+EXPECTED_FRAMES = 130 
+
 # ==========================================
-# LOAD TFLITE MODEL
+# 2. MQTT SETUP (FIXED)
+# ==========================================
+# ==========================================
+# 2. MQTT SETUP (ROBUST VERSION)
+# ==========================================
+def send_to_wokwi(command):
+    try:
+        # 1. Setup Client
+        client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2)
+        
+        # 2. Connect
+        client.connect(CONFIG["mqtt_broker"], 1883, 60)
+        client.loop_start() # Start background network thread
+        
+        # 3. Publish with QoS=1 (Guarantees delivery)
+        # We capture the 'message info' object to track status
+        msg_info = client.publish(CONFIG["mqtt_topic"], command, qos=1)
+        
+        # 4. BLOCK until the broker confirms receipt (Max 2 seconds)
+        msg_info.wait_for_publish(timeout=2.0)
+        
+        # 5. Cleanup
+        client.loop_stop()
+        client.disconnect()
+        return True
+
+    except Exception as e:
+        st.error(f"MQTT Error: {e}")
+        return False
+
+# ==========================================
+# 3. LOAD MODEL & CLASSES
 # ==========================================
 @st.cache_resource
-def load_interpreter():
-    interpreter = tf.lite.Interpreter(
-        model_path="tiny_safety_3class_int8.tflite"
-    )
+def load_resources():
+    # 1. Load Classes
+    if os.path.exists(CONFIG["classes_path"]):
+        classes = np.load(CONFIG["classes_path"], allow_pickle=True)
+    else:
+        classes = np.array(['angry', 'disgust', 'fear', 'happy', 'neutral', 'sad', 'surprise'])
+    
+    # 2. Load Model
+    if not os.path.exists(CONFIG["model_path"]):
+        st.error(f"Model file {CONFIG['model_path']} not found!")
+        return None, None
+
+    interpreter = tf.lite.Interpreter(model_path=CONFIG["model_path"])
     interpreter.allocate_tensors()
-    return interpreter
+    return interpreter, classes
 
-interpreter = load_interpreter()
-input_details = interpreter.get_input_details()
-output_details = interpreter.get_output_details()
+interpreter, classes = load_resources()
 
-EXPECTED_SHAPE = tuple(input_details[0]["shape"])  # (1, 1, 64, 64)
-
-# ==========================================
-# PREPROCESS (BIT-EXACT WITH inference.py)
-# ==========================================
-def preprocess_audio(audio_np):
-    # Normalize waveform
-    max_val = np.max(np.abs(audio_np))
-    if max_val > 0:
-        audio_np = audio_np / max_val
-
-    # Mel Spectrogram (LIBROSA — SAME AS TRAINING)
-    mel = librosa.feature.melspectrogram(
-        y=audio_np,
-        sr=TARGET_SR,
-        n_mels=N_MELS,
-        n_fft=1024,
-        hop_length=512
-    )
-
-    mel_db = librosa.power_to_db(mel, ref=np.max)
-
-    # Resize to (64, 64) — MATCH torch.interpolate
-    mel_db = tf.image.resize(
-        mel_db[:, :, np.newaxis],
-        (64, 64)
-    ).numpy()[:, :, 0]
-
-
-    # Normalize 0–1 (MATCH training)
-    mel_db = (mel_db - mel_db.min()) / (mel_db.max() - mel_db.min() + 1e-6)
-
-    # NCHW FORMAT (CRITICAL)
-    mel_db = mel_db[np.newaxis, np.newaxis, :, :]  # (1, 1, 64, 64)
-
-    # Shape validation (SAFE)
-    if mel_db.shape != EXPECTED_SHAPE:
-        raise ValueError(
-            f"Input shape mismatch: got {mel_db.shape}, expected {EXPECTED_SHAPE}"
-        )
-
-    # INT8 quantization
-    if input_details[0]["dtype"] == np.int8:
-        scale, zero_point = input_details[0]["quantization"]
-        mel_db = mel_db / scale + zero_point
-        mel_db = np.clip(mel_db, -128, 127).astype(np.int8)
-
-    return mel_db
+if interpreter:
+    input_details = interpreter.get_input_details()
+    output_details = interpreter.get_output_details()
 
 # ==========================================
-# STREAMLIT UI
+# 4. PREPROCESS
 # ==========================================
-st.title("🔊 TinyML Safety Audio Classifier (INT8)")
-st.write("Upload an audio file to analyze emotional safety state.")
+def preprocess_audio(audio_path):
+    try:
+        # Load audio (22050 Hz)
+        y, sr = librosa.load(audio_path, sr=CONFIG["sample_rate"])
+    except Exception as e:
+        st.error(f"Error loading audio: {e}")
+        return None
 
-uploaded_file = st.file_uploader(
-    "Upload WAV or MP3",
-    type=["wav", "mp3"]
-)
+    # Trim silence
+    y, _ = librosa.effects.trim(y)
+
+    # Pad/Truncate to target sample length (3.0s)
+    if len(y) > TARGET_LENGTH:
+        y = y[:TARGET_LENGTH]
+    else:
+        padding = TARGET_LENGTH - len(y)
+        y = np.pad(y, (0, padding), 'constant')
+
+    # Extract MFCC
+    mfcc = librosa.feature.mfcc(y=y, sr=sr, n_mfcc=CONFIG["n_mfcc"])
+    mfcc = mfcc.astype(np.float32)
+
+    # Fix Time Steps to exactly 130
+    curr = mfcc.shape[1]
+    if curr < EXPECTED_FRAMES:
+        pad_width = EXPECTED_FRAMES - curr
+        mfcc = np.pad(mfcc, ((0, 0), (0, pad_width)), mode='constant')
+    else:
+        mfcc = mfcc[:, :EXPECTED_FRAMES]
+        
+    # Add Batch & Channel dims: (1, 40, 130, 1)
+    input_tensor = np.expand_dims(mfcc, axis=0)
+    input_tensor = np.expand_dims(input_tensor, axis=-1)
+    
+    return input_tensor
+
+# ==========================================
+# 5. STREAMLIT UI
+# ==========================================
+st.title("🛡️ Women Safety Analytics (Wokwi Linked)")
+st.markdown(f"**Connected to:** `{CONFIG['mqtt_topic']}` on `{CONFIG['mqtt_broker']}`")
+
+uploaded_file = st.file_uploader("Upload Audio (WAV/MP3)", type=["wav", "mp3"])
 
 if uploaded_file is not None:
+    # Save temp file
     with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as tmp:
         tmp.write(uploaded_file.read())
         audio_path = tmp.name
 
-    try:
-        audio, _ = librosa.load(audio_path, sr=TARGET_SR)
+    st.audio(audio_path)
 
-        input_tensor = preprocess_audio(audio)
+    if st.button("Analyze Audio"):
+        if interpreter is None:
+            st.error("Model not loaded.")
+        else:
+            with st.spinner("Processing..."):
+                # 1. Preprocess
+                input_data = preprocess_audio(audio_path)
+                
+                if input_data is not None:
+                    # 2. Inference
+                    interpreter.set_tensor(input_details[0]['index'], input_data)
+                    interpreter.invoke()
+                    probs = interpreter.get_tensor(output_details[0]['index'])[0]
 
-        interpreter.set_tensor(
-            input_details[0]["index"],
-            input_tensor
-        )
-        interpreter.invoke()
+                    # 3. Get Result
+                    pred_idx = np.argmax(probs)
+                    confidence = probs[pred_idx] * 100
+                    emotion = classes[pred_idx]
 
-        output = interpreter.get_tensor(
-            output_details[0]["index"]
-        )[0]
+                    # 4. Safety Logic & MQTT
+                    if emotion == 'fear':
+                        status = "🚨 DANGER"
+                        color = "red"
+                        mqtt_cmd = "D"
+                    elif emotion == 'angry':
+                        status = "⚠️ CAUTION"
+                        color = "orange"
+                        mqtt_cmd = "C"
+                    else:
+                        status = "✅ SAFE"
+                        color = "green"
+                        mqtt_cmd = "S"
 
-        # Dequantize output if INT8
-        if output_details[0]["dtype"] == np.int8:
-            scale, zero_point = output_details[0]["quantization"]
-            output = (output.astype(np.float32) - zero_point) * scale
+                    # 5. Send to Wokwi
+                    sent = send_to_wokwi(mqtt_cmd)
+                    
+                    # 6. Display Result
+                    st.markdown(f"## Result: :{color}[{status}]")
+                    st.markdown(f"**Detected Emotion:** {emotion.upper()}")
+                    st.markdown(f"**Confidence:** {confidence:.2f}%")
+                    
+                    if sent:
+                        st.success(f"📡 Signal '{mqtt_cmd}' sent to Wokwi Badge.")
+                    else:
+                        st.error("❌ Failed to send signal to Wokwi.")
 
-        probs = tf.nn.softmax(output).numpy()
+                    # Show Bar Chart
+                    st.bar_chart(probs)
 
-        pred_id = int(np.argmax(probs))
-        pred_label = ID_TO_LABEL[pred_id]
-
-        st.success(f"Prediction: **{pred_label}**")
-
-        st.subheader("Confidence Scores")
-        for i, label in ID_TO_LABEL.items():
-            st.write(f"{label}: {probs[i]*100:.1f}%")
-
-    except Exception as e:
-        st.error(f"Error during inference: {e}")
-
-    finally:
-        os.remove(audio_path)
+    # Cleanup
+    os.remove(audio_path)
