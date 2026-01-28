@@ -232,7 +232,7 @@ def analyze_audio(source):
                     ).properties(height=300) # Ensure it has space
 
                     # 3. Render
-                    st.altair_chart(c, use_container_width=True))
+                    st.altair_chart(c, use_container_width=True)
 
     # Cleanup
     try:
