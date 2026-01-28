@@ -7,6 +7,7 @@ import tempfile
 import os
 import time
 import uuid
+import pandas as pd
 
 # ==========================================
 # 1. CONFIGURATION
@@ -213,8 +214,12 @@ def analyze_audio(source):
                     else:
                         st.error("❌ Failed to send signal to Wokwi.")
 
-                    # Show Bar Chart
-                    st.bar_chart(probs)
+                    chart_data = pd.DataFrame(
+                        probs,
+                        index=classes,
+                        columns=["Probability"]
+                    )
+                    st.bar_chart(chart_data)
 
     # Cleanup
     try:
