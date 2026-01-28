@@ -8,6 +8,7 @@ import os
 import time
 import uuid
 import pandas as pd
+import altair as alt
 
 # ==========================================
 # 1. CONFIGURATION
@@ -214,12 +215,24 @@ def analyze_audio(source):
                     else:
                         st.error("❌ Failed to send signal to Wokwi.")
 
-                    chart_data = pd.DataFrame(
-                        probs,
-                        index=classes,
-                        columns=["Probability"]
-                    )
-                    st.bar_chart(chart_data)
+                    chart_data = pd.DataFrame({
+                        "Emotion": classes,
+                        "Probability": probs
+                    })
+
+                    # 2. Build Altair Chart (Horizontal)
+                    c = alt.Chart(chart_data).mark_bar().encode(
+                        x=alt.X('Probability', axis=alt.Axis(format='%')), # Percent scale
+                        y=alt.Y('Emotion', sort='-x'),  # Sort bars by size
+                        color=alt.condition(
+                            alt.datum.Emotion == emotion,  # Highlight winner
+                            alt.value('orange'),
+                            alt.value('steelblue')
+                        )
+                    ).properties(height=300) # Ensure it has space
+
+                    # 3. Render
+                    st.altair_chart(c, use_container_width=True))
 
     # Cleanup
     try:
